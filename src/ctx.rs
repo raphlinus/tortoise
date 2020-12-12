@@ -7,6 +7,7 @@ use rspirv::spirv::{Op, Word};
 #[derive(Default)]
 pub struct Ctx {
     pub names: HashMap<Word, String>,
+    member_names: HashMap<(Word, Word), String>,
     inst_map: HashMap<Word, Instruction>,
     pub funcs: Vec<Function>,
     cur_func: Option<Function>,
@@ -39,7 +40,7 @@ impl Consumer for Ctx {
     }
 
     fn consume_instruction(&mut self, inst: Instruction) -> ParseAction {
-        println!("inst: {:?}", inst);
+        //println!("inst: {:?}", inst);
         if inst.class.opcode == Op::FunctionEnd {
             self.funcs.push(self.cur_func.take().unwrap());
         } else if let Some(func) = self.cur_func.as_mut() {
@@ -57,10 +58,31 @@ impl Consumer for Ctx {
         } else {
             match inst.class.opcode {
                 Op::Name => {
-                    println!("operands: {:?}", inst.operands);
-                    if let (Operand::IdRef(id), Operand::LiteralString(s)) = (&inst.operands[0], &inst.operands[1]) {
+                    if let (Operand::IdRef(id), Operand::LiteralString(s)) =
+                        (&inst.operands[0], &inst.operands[1])
+                    {
                         self.names.insert(*id, s.clone());
                     }
+                }
+                Op::MemberName => {
+                    if let (
+                        Operand::IdRef(id),
+                        Operand::LiteralInt32(ix),
+                        Operand::LiteralString(s),
+                    ) = (&inst.operands[0], &inst.operands[1], &inst.operands[2])
+                    {
+                        self.member_names.insert((*id, *ix), s.clone());
+                    }
+                }
+                Op::TypeStruct => {
+                    let struct_id = inst.result_id.unwrap();
+                    println!("struct {} {{", self.name(struct_id));
+                    for (i, ty) in inst.operands.iter().enumerate() {
+                        if let Some(member_name) = self.member_names.get(&(struct_id, i as Word)) {
+                            println!("    {}: TODO,", member_name);
+                        }
+                    }
+                    println!("}}");
                 }
                 Op::Function => {
                     let function = Function {
@@ -97,7 +119,7 @@ impl Ctx {
                 // We're hoping some statement bound this value.
                 self.name(*id)
             }
-            _ => format!("[unhandled {:?}]", operand)
+            _ => format!("[unhandled {:?}]", operand),
         }
     }
 
@@ -120,13 +142,13 @@ impl Ctx {
                 }
                 if let Some(inst) = self.inst_map.get(&id) {
                     match inst.class.opcode {
-                        _ => format!("[unhandled {:?}]", inst.class.opcode)
+                        _ => format!("[unhandled {:?}]", inst.class.opcode),
                     }
                 } else {
                     panic!("no inst with result id {}", id)
                 }
             }
-            _ => format!("[unhandled {:?}]", operand)
+            _ => format!("[unhandled {:?}]", operand),
         }
     }
 

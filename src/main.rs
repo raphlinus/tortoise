@@ -1,5 +1,4 @@
-
-use rspirv::binary::{Parser};
+use rspirv::binary::Parser;
 
 mod ctx;
 
