@@ -79,7 +79,9 @@ impl Consumer for Ctx {
                     println!("struct {} {{", self.name(struct_id));
                     for (i, ty) in inst.operands.iter().enumerate() {
                         if let Some(member_name) = self.member_names.get(&(struct_id, i as Word)) {
-                            println!("    {}: TODO,", member_name);
+                            if let Operand::IdRef(ty_id) = ty {
+                                println!("    {}: {},", member_name, self.type_rs(*ty_id));
+                            }
                         }
                     }
                     println!("}}");
@@ -149,6 +151,36 @@ impl Ctx {
                 }
             }
             _ => format!("[unhandled {:?}]", operand),
+        }
+    }
+
+    fn type_rs(&self, id: Word) -> String {
+        if let Some(inst) = self.inst_map.get(&id) {
+            match inst.class.opcode {
+                Op::TypeInt => {
+                    if let (Operand::LiteralInt32(size), Operand::LiteralInt32(sign)) =
+                        (&inst.operands[0], &inst.operands[1])
+                    {
+                        if *sign == 0 {
+                            format!("u{}", size)
+                        } else {
+                            format!("i{}", size)
+                        }
+                    } else {
+                        panic!("unknown TypeInt args: {:?}", inst.operands);
+                    }
+                }
+                Op::TypeRuntimeArray => {
+                    if let Operand::IdRef(inner) = inst.operands[0] {
+                        format!("*mut {}", self.type_rs(inner))
+                    } else {
+                        panic!("unknown TypeRuntimeArray args: {:?}", inst.operands);
+                    }
+                }
+                _ => format!("[unhandled type {:?}]", inst.class.opcode),
+            }
+        } else {
+            panic!("no inst for type {}", id);
         }
     }
 
