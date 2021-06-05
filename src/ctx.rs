@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rspirv::binary::{Consumer, ParseAction};
 use rspirv::dr::{Instruction, ModuleHeader, Operand};
-use rspirv::spirv::{Op, Word};
+use rspirv::spirv::{Op, StorageClass, Word};
 
 #[derive(Default)]
 pub struct Ctx {
@@ -118,6 +118,14 @@ impl Ctx {
                 if let Some(result) = self.opt_rvalue_rs(*id) {
                     return result;
                 }
+                if let Some(inst) = self.inst_map.get(&id) {
+                    match inst.class.opcode {
+                        Op::Constant => {
+                            return self.constant(inst.result_type.unwrap(), &inst.operands[0])
+                        }
+                        _ => (),
+                    }
+                }
                 // We're hoping some statement bound this value.
                 self.name(*id)
             }
@@ -184,6 +192,43 @@ impl Ctx {
         }
     }
 
+    fn deref_ptr(&self, id: Word) -> Word {
+        if let Some(inst) = self.inst_map.get(&id) {
+            match inst.class.opcode {
+                Op::TypePointer => match inst.operands[1] {
+                    Operand::IdRef(id) => id,
+                    _ => panic!("don't know how to deref non-id"),
+                },
+                _ => panic!("dereferencing non-points"),
+            }
+        } else {
+            panic!("No inst for ptr {}", id);
+        }
+    }
+
+    fn constant(&self, ty: Word, operand: &Operand) -> String {
+        if let Some(ty_inst) = self.inst_map.get(&ty) {
+            match (ty_inst.class.opcode, operand) {
+                (Op::TypeInt, Operand::LiteralInt32(i)) => {
+                    if let (Operand::LiteralInt32(size), Operand::LiteralInt32(sign)) =
+                        (&ty_inst.operands[0], &ty_inst.operands[1])
+                    {
+                        if *sign == 0 {
+                            format!("{}u{}", i, size)
+                        } else {
+                            format!("{}i{}", (*i as i32), size)
+                        }
+                    } else {
+                        panic!("unknown TypeInt args: {:?}", ty_inst.operands);
+                    }
+                }
+                _ => panic!("unknown constant type"),
+            }
+        } else {
+            panic!("No inst for constant type {}", ty);
+        }
+    }
+
     fn binop(&self, inst: &Instruction, op: &str) -> Option<String> {
         let operand0 = self.lvalue_rs(&inst.operands[0]);
         let operand1 = self.lvalue_rs(&inst.operands[1]);
@@ -207,6 +252,15 @@ impl Ctx {
             Op::AccessChain => None,
             // pretty good chance this should be wrapping_add, but let's keep things simple.
             Op::IAdd => self.binop(inst, "+"),
+            Op::Variable => {
+                assert_eq!(
+                    inst.operands[0],
+                    Operand::StorageClass(StorageClass::Function)
+                );
+                let var_name = self.name(inst.result_id.unwrap());
+                let ty = self.deref_ptr(inst.result_type.unwrap());
+                Some(format!("let mut {}: {};", var_name, self.type_rs(ty)))
+            }
             _ => Some(format!("// unhandled inst {:?}", inst.class.opcode)),
         }
     }
